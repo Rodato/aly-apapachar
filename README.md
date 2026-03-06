@@ -1,82 +1,137 @@
 # Aly Apapachar
 
 Bot de WhatsApp especializado en el **Manual A+P (ICBF)** de Equimundo.
+Asistente para facilitadores del programa de crianza **Apapáchar** — responde consultas, ayuda a planificar sesiones y genera ideas creativas, todo basado en un único documento fuente.
 
-Fork minimalista de puddleAsistant — solo RAG, solo un documento.
+---
 
-## Estructura
+## Arquitectura
+
+```
+Usuario
+  └── Language Agent        → detecta ES / EN / PT
+        └── Intent Agent    → clasifica la intención
+              ├── GREETING  → mensaje de bienvenida
+              ├── FACTUAL   → RAG Agent
+              ├── PLAN      → Plan Agent
+              ├── IDEATE    → Ideate Agent
+              └── SENSITIVE → mensaje de derivación
+```
+
+**Fuente única:** `3. MANUAL A+P_vICBF.docx.md` — filtro hardcodeado en MongoDB.
+
+---
+
+## Agentes y modelos
+
+| Agente | Modelo | Propósito |
+|--------|--------|-----------|
+| **Language Agent** | `mistralai/ministral-8b-2512` | Detecta el idioma del mensaje (ES/EN/PT) |
+| **Intent Agent** | `mistralai/ministral-8b-2512` | Clasifica la intención: GREETING / FACTUAL / PLAN / IDEATE / SENSITIVE |
+| **RAG Agent** | `gpt-4o-mini` | Responde preguntas factuales sobre el Manual A+P |
+| **Plan Agent** | `google/gemini-2.5-flash-lite` | Ayuda a implementar y adaptar actividades a contextos específicos |
+| **Ideate Agent** | `mistralai/mistral-small-creative` | Genera ideas creativas e inspiradoras ancladas en el Manual |
+
+### Intenciones detectadas
+
+| Intent | Cuándo se activa |
+|--------|-----------------|
+| `GREETING` | El usuario saluda o inicia la conversación |
+| `FACTUAL` | Busca información o definiciones del manual |
+| `PLAN` | Quiere implementar, adaptar o planificar una actividad concreta |
+| `IDEATE` | Pide nuevas ideas, variaciones o inspiración |
+| `SENSITIVE` | Tema de trauma, abuso, crisis de salud mental → derivación |
+
+---
+
+## Estructura del proyecto
 
 ```
 Aly_Apapachar/
-├── bot.py              # WhatsApp bot (puerto 8003)
-├── orchestrator.py     # Flujo: Language → Intent → RAG
-├── console.py          # Testing local sin WhatsApp
-├── language_detector.py
+├── bot.py                   # WhatsApp bot — FastAPI, puerto 8003
+├── orchestrator.py          # Flujo LangGraph: Language → Intent → Agente
+├── console.py               # Testing local sin WhatsApp
+├── language_detector.py     # Detector de idioma (ES/EN/PT)
 ├── agents/
-│   ├── base_agent.py
-│   ├── language_agent.py
-│   ├── intent_agent.py   # Solo: GREETING | SENSITIVE | FACTUAL
-│   └── rag_agent.py      # Filtrado a "3. MANUAL A+P_vICBF"
+│   ├── base_agent.py        # Clase base y AgentState
+│   ├── language_agent.py    # Detección de idioma
+│   ├── intent_agent.py      # Clasificación de intención
+│   ├── rag_agent.py         # Respuestas factuales (RAG)
+│   ├── plan_agent.py        # Planificación de actividades
+│   └── ideate_agent.py      # Ideación creativa
+├── rag/
+│   └── simple_rag_mongo.py  # RAG sobre MongoDB (embeddings + cosine similarity)
 ├── config/
-│   └── welcome_messages.py
-├── .env                # Copiar de puddleAsistant y editar
+│   └── welcome_messages.py  # Mensajes de bienvenida y follow-up (ES/EN/PT)
+├── Dockerfile
+├── docker-compose.yml
 └── requirements.txt
 ```
 
-## Setup
+---
+
+## Variables de entorno
+
+Crear un archivo `.env` con:
 
 ```bash
-cd /Users/daniel/Desktop/Dev/Aly_Apapachar
+# Twilio — número dedicado para Apapachar
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_NUMBER=whatsapp:+
 
-# 1. Copiar .env de puddleAsistant y editar TWILIO_WHATSAPP_NUMBER
-cp ../puddleAsistant/.env .env
-# Editar: TWILIO_WHATSAPP_NUMBER=whatsapp:+<nuevo_numero>
+# APIs
+OPENROUTER_API_KEY=
+OPENAI_API_KEY=
 
-# 2. Instalar dependencias (usa el venv de puddleAsistant o crea uno nuevo)
+# MongoDB (compartido con puddleAsistant)
+MONGODB_URI=
+MONGODB_DB_NAME=
+MONGODB_COLLECTION_NAME=
+```
+
+---
+
+## Setup local
+
+```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Test local
+# Test sin WhatsApp
 python3 console.py
 
-# 4. WhatsApp bot
+# Bot completo
 python3 bot.py
-```
-
-## Iniciar el bot (producción)
-
-```bash
-# Terminal 1
-source venv/bin/activate
-python3 bot.py
-
-# Terminal 2
+# En otra terminal:
 ngrok http 8003
-# Configurar en Twilio: https://xxxxx.ngrok.io/webhook/whatsapp
+# Configurar en Twilio: https://xxxx.ngrok.io/webhook/whatsapp
 ```
 
-## Variables de entorno (.env)
+---
+
+## Deploy con Docker
 
 ```bash
-TWILIO_ACCOUNT_SID=<account_sid>
-TWILIO_AUTH_TOKEN=<auth_token>
-TWILIO_WHATSAPP_NUMBER=whatsapp:+<nuevo_numero_apapachar>
+docker compose up -d
 
-OPENROUTER_API_KEY=<key>
-OPENAI_API_KEY=<key>
+# Logs
+docker compose logs -f apapachar
 
-MONGODB_URI=<connection_string>
-MONGODB_DB_NAME=<db_name>
-MONGODB_COLLECTION_NAME=<collection_name>
+# Actualizar
+git pull && docker compose up -d --build
 ```
 
-## Diferencias con puddleAsistant
+El `docker-compose.yml` incluye healthcheck automático sobre `/health`.
 
-| Feature | puddleAsistant | Aly Apapachar |
-|---------|---------------|----------------|
-| Documentos | 36 documentos | Solo Manual A+P |
-| Agentes | RAG + Workshop + Brainstorming | Solo RAG |
-| Intents | GREETING/FACTUAL/PLAN/IDEATE/SENSITIVE/AMBIGUOUS | GREETING/FACTUAL/SENSITIVE |
-| Puerto | 8002 | 8003 |
-| Memoria Supabase | ✅ | ❌ (puede agregarse) |
+---
+
+## Stack técnico
+
+- **Framework:** FastAPI + LangGraph
+- **WhatsApp:** Twilio
+- **Base de datos:** MongoDB Atlas (búsqueda semántica con cosine similarity)
+- **Embeddings:** `text-embedding-ada-002` (OpenAI)
+- **LLMs:** OpenRouter + OpenAI
+- **Idiomas soportados:** Español, Inglés, Portugués
