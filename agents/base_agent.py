@@ -6,7 +6,8 @@ Base Agent - Aly Apapachar
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,13 @@ class AgentState:
     response: Optional[str] = None
     sources: Optional[list] = None
     debug_info: Optional[Dict] = None
+    # User profile from MongoDB (set by bot.py before entering orchestrator)
+    user_profile: Optional[Dict] = None
+    # Collections to query — set by LibrarianAgent
+    sources_to_query: Optional[List[str]] = None
+    # Metadata filters per collection — set by LibrarianAgent
+    # e.g. {"aly_general_knowledge": {"theme_category": ["rompehielos"]}}
+    rag_filters: Optional[Dict] = None
 
 class BaseAgent(ABC):
     """Agente base con funcionalidades comunes."""

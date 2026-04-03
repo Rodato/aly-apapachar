@@ -68,7 +68,7 @@ class IntentAgent(BaseAgent):
         lang = language_config.get('code', 'es') if language_config else 'es'
 
         if lang == 'en':
-            return f"""Classify this user input into one of five intents for the Apapáchar parenting program:
+            return f"""Classify this user input into one of five intents for Aly, an assistant for Equimundo facilitators:
 
 User input: "{user_input}"
 
@@ -77,13 +77,13 @@ Intents:
 - PLAN → User wants to IMPLEMENT, ADAPT or PLAN specific activities (e.g. "help me run session 1", "how do I adapt this for virtual groups")
 - IDEATE → User wants NEW IDEAS, INSPIRATION or CREATIVE VARIATIONS (e.g. "give me ideas", "what else could I do", "suggest alternatives")
 - SENSITIVE → Topic involves trauma, abuse, family conflict, mental health crisis
-- FACTUAL → User seeks specific information, definitions or facts from the manual
+- FACTUAL → User seeks specific information, definitions or facts about Equimundo programs
 
 Respond ONLY with valid JSON:
 {{"intent": "GREETING|PLAN|IDEATE|SENSITIVE|FACTUAL", "confidence": 0.0-1.0}}"""
 
         elif lang == 'pt':
-            return f"""Classifique esta entrada do usuário em uma das cinco intenções para o programa de parentalidade Apapáchar:
+            return f"""Classifique esta entrada do usuário em uma das cinco intenções para Aly, assistente para facilitadores da Equimundo:
 
 Entrada: "{user_input}"
 
@@ -92,13 +92,13 @@ Intenções:
 - PLAN → Usuário quer IMPLEMENTAR, ADAPTAR ou PLANEJAR atividades específicas
 - IDEATE → Usuário quer NOVAS IDEIAS, INSPIRAÇÃO ou VARIAÇÕES CRIATIVAS
 - SENSITIVE → Tópico envolve trauma, abuso, conflito familiar, crise de saúde mental
-- FACTUAL → Usuário busca informação específica, definições ou fatos do manual
+- FACTUAL → Usuário busca informação específica, definições ou fatos sobre os programas da Equimundo
 
 Responda APENAS com JSON válido:
 {{"intent": "GREETING|PLAN|IDEATE|SENSITIVE|FACTUAL", "confidence": 0.0-1.0}}"""
 
         else:
-            return f"""Clasifica esta entrada del usuario en una de cinco intenciones para el programa de crianza Apapáchar:
+            return f"""Clasifica esta entrada del usuario en una de cinco intenciones para Aly, asistente de facilitadores de Equimundo:
 
 Entrada: "{user_input}"
 
@@ -107,7 +107,7 @@ Intenciones:
 - PLAN → El usuario quiere IMPLEMENTAR, ADAPTAR o PLANIFICAR actividades concretas (ej: "ayúdame a facilitar la sesión 1", "cómo adapto esto para grupos virtuales")
 - IDEATE → El usuario quiere NUEVAS IDEAS, INSPIRACIÓN o VARIACIONES CREATIVAS (ej: "dame ideas", "qué más puedo hacer", "sugiere alternativas")
 - SENSITIVE → El tema involucra trauma, abuso, conflicto familiar, crisis de salud mental
-- FACTUAL → El usuario busca información específica, definiciones o hechos del manual
+- FACTUAL → El usuario busca información específica, definiciones o hechos sobre los programas de Equimundo
 
 Responde SOLO con JSON válido:
 {{"intent": "GREETING|PLAN|IDEATE|SENSITIVE|FACTUAL", "confidence": 0.0-1.0}}"""

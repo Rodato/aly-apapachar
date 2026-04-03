@@ -1,60 +1,84 @@
-# CLAUDE.md - Aly Apapachar
+# CLAUDE.md - Aly
 
 ## 🎯 Estado Actual del Proyecto
 
-**Proyecto**: Aly Apapachar - Bot WhatsApp especializado en el Manual A+P (ICBF)
+**Proyecto**: Aly — Asistente WhatsApp de Equimundo
 **Fecha creación**: 2026-03-05
-**Fase**: PROYECTO CREADO - PENDIENTE ACTIVACIÓN ⏳
-**Origen**: Fork minimalista de puddleAsistant
+**Fase**: FUNCIONAL EN LOCAL — pendiente deploy en producción
 
 ## 🏗️ Arquitectura del Sistema
 
-**Un documento, un agente, un propósito.**
+- **Aly**: Asistente experta en programas de Equimundo. Ayuda a facilitadores a implementar y aplicar los programas de Equimundo.
+- **MongoDB**: Cluster puddle — 3 colecciones: `apapachar`, `aly_general_knowledge`, `user_profiles`
+- **WhatsApp**: Twilio — número dedicado
+- **Sin Supabase**: Sin memoria conversacional por ahora
+- **Idioma**: Solo español por ahora
 
-- **MongoDB**: Mismo cluster que puddleAsistant — filtro hardcodeado a `"3. MANUAL A+P_vICBF.docx.md"`
-- **WhatsApp**: Twilio — número diferente al bot principal
-- **Sin Supabase**: Versión mini sin memoria conversacional (puede agregarse después)
+### Flujo:
+```
+Usuario → bot.py (check onboarding)
+  → Nuevo: OnboardingAgent (nombre → género → país → región → email)
+  → Completo: Language Agent → [Intent Agent + Librarian Agent en paralelo] → barrier → Agente → Respuesta
+```
 
-### Flujo simplificado:
-```
-Usuario → Language Detection → Intent (GREETING | SENSITIVE | FACTUAL) → RAG filtrado → Respuesta
-```
+### Intents:
+`GREETING | FACTUAL | PLAN | IDEATE | SENSITIVE`
+
+### Routing (LibrarianAgent):
+- Corre en **paralelo** con el Intent Agent (LangGraph fan-out)
+- Colombia → LLM decide colecciones + filtros `theme_category`: `["apapachar"]` | `["aly_general_knowledge"]` | ambas
+- No-Colombia → siempre `["aly_general_knowledge"]`, sin filtros
+
+### Filtros de metadata (rag_filters):
+- Solo aplica a `aly_general_knowledge` · campo `theme_category`
+- Categorías indexadas: `marco_teorico` | `tips_facilitadores` | `mejores_practicas` | `rompehielos`
+- Si el filtro retorna 0 docs → fallback sin filtro automático (en `multi_collection_rag.py`)
 
 ## 📁 Estructura del Proyecto
 
 ```
 Aly_Apapachar/
-├── bot.py              # WhatsApp bot (puerto 8003)
-├── orchestrator.py     # Orquestador LangGraph simplificado
-├── console.py          # Testing local sin WhatsApp
-├── language_detector.py
+├── bot.py                    # WhatsApp bot (puerto 8003) — check onboarding antes del grafo
+├── orchestrator.py           # LangGraph: Language → [Intent ∥ Librarian] → barrier → Agente
+├── console.py                # Testing local sin WhatsApp
 ├── agents/
-│   ├── base_agent.py
+│   ├── base_agent.py         # AgentState: incluye sources_to_query, rag_filters
 │   ├── language_agent.py
-│   ├── intent_agent.py   # Solo: GREETING | SENSITIVE | FACTUAL
-│   └── rag_agent.py      # Filtro hardcodeado al Manual A+P
+│   ├── intent_agent.py       # GREETING | FACTUAL | PLAN | IDEATE | SENSITIVE
+│   ├── librarian_agent.py    # Paralelo al Intent — decide colecciones + rag_filters
+│   ├── onboarding_agent.py   # Registro stateless de nuevos facilitadores
+│   ├── factual_agent.py      # intent: FACTUAL (antes rag_agent.py)
+│   ├── plan_agent.py         # intent: PLAN
+│   └── ideate_agent.py       # intent: IDEATE
+├── rag/
+│   ├── simple_rag_mongo.py   # Mantener (backward compat)
+│   └── multi_collection_rag.py  # search_chunks(metadata_filters=) — filtro MongoDB $in + fallback
+├── db/
+│   └── user_profiles.py      # CRUD de perfiles de facilitadores
+├── data/
+│   ├── ALY_Knowledge_Base.xlsx  # Catálogo completo — fuente del prompt del Librarian
+│   └── docs/                 # 22 .docx ingestados en aly_general_knowledge
+├── ingest_general_knowledge.py  # Script one-shot (ya ejecutado)
 ├── config/
-│   └── welcome_messages.py  # Mensajes específicos de Apapáchar (ES/EN/PT)
-├── .env                # Variables de entorno (NO commitear)
+│   └── welcome_messages.py
+├── Dockerfile
+├── docker-compose.yml
+├── .env                      # Variables de entorno (NO commitear)
 └── requirements.txt
 ```
 
 ## ⚙️ Variables de Entorno (.env)
 
 ```bash
-# Twilio - número dedicado para Apapachar
 TWILIO_ACCOUNT_SID=<account_sid>
 TWILIO_AUTH_TOKEN=<auth_token>
-TWILIO_WHATSAPP_NUMBER=whatsapp:+<numero_apapachar>
+TWILIO_WHATSAPP_NUMBER=whatsapp:+<numero>
 
-# APIs (mismas que puddleAsistant)
 OPENROUTER_API_KEY=<key>
 OPENAI_API_KEY=<key>
 
-# MongoDB (mismo cluster que puddleAsistant)
 MONGODB_URI=<connection_string>
-MONGODB_DB_NAME=<db_name>
-MONGODB_COLLECTION_NAME=<collection_name>
+MONGODB_DB_NAME=puddle
 ```
 
 ## 🚀 Comandos Clave
@@ -74,37 +98,29 @@ ngrok http 8003
 # Webhook Twilio: https://xxxxx.ngrok.io/webhook/whatsapp
 ```
 
-## 🔧 Setup Inicial (una vez)
+## 🤖 Agentes y Modelos
 
-```bash
-# 1. Copiar .env de puddleAsistant
-cp ../puddleAsistant/.env .env
-# Editar TWILIO_WHATSAPP_NUMBER al número de Apapachar
+| Agente | Rol | Modelo | Via |
+|--------|-----|--------|-----|
+| Onboarding Agent | Pre-proceso nuevos usuarios | — (lógica Python) | — |
+| Language Agent | Detecta idioma | mistralai/ministral-8b-2512 | OpenRouter |
+| Intent Agent | Clasifica intent (paralelo al Librarian) | mistralai/ministral-8b-2512 | OpenRouter |
+| Librarian Agent | Decide colecciones + rag_filters (paralelo al Intent) | minimax/minimax-m2.7 | OpenRouter |
+| Factual Agent | FACTUAL — recupera contexto + genera respuesta factual | gpt-4o-mini | OpenAI |
+| Plan Agent | PLAN — recupera contexto + genera plan paso a paso | google/gemini-2.5-flash-lite | OpenRouter |
+| Ideate Agent | IDEATE — recupera contexto + genera ideas creativas | mistralai/mistral-small-creative | OpenRouter |
 
-# 2. Crear venv
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+## 🔑 Decisiones de Arquitectura
 
-# 3. Probar
-python3 console.py
-```
+- **Parallel fan-out**: Intent + Librarian corren simultáneamente tras Language. Se sincronizan en un nodo `barrier` antes del agente de respuesta.
+- **Cada agente recupera su propio contexto**: Factual, Plan e Ideate llaman a `search_chunks()` directamente con `sources_to_query` + `rag_filters` del estado.
+- **Librarian con catálogo completo**: el prompt del Librarian incluye los 22 documentos de la biblioteca con sus resúmenes reales (fuente: ALY_Knowledge_Base.xlsx).
+- **rag_agent.py renombrado a factual_agent.py**: clase `FactualAgent`. El nombre refleja el rol, no la técnica.
 
-## 🔑 Diferencias vs puddleAsistant
+## 📋 Pendiente
 
-| Feature | puddleAsistant | Aly Apapachar |
-|---------|---------------|----------------|
-| Documentos | 36 documentos | Solo Manual A+P (ICBF) |
-| Agentes | RAG + Workshop + Brainstorming | Solo RAG |
-| Intents | 6 (GREETING/FACTUAL/PLAN/IDEATE/SENSITIVE/AMBIGUOUS) | 3 (GREETING/FACTUAL/SENSITIVE) |
-| Puerto | 8002 | 8003 |
-| Memoria Supabase | ✅ | ❌ (puede agregarse) |
-| Filtro MongoDB | Dinámico por programa | Hardcodeado a A+P vICBF |
-
-## 📋 Tareas Pendientes
-
-1. **Copiar y configurar .env** con número de WhatsApp dedicado
-2. **Crear venv e instalar dependencias**
-3. **Test con `console.py`** antes de conectar WhatsApp
-4. **Configurar webhook en Twilio** con URL de ngrok/VPS
-5. **Opcional**: Agregar memoria Supabase (copiar de puddleAsistant)
+1. **Deploy** en VPS (Hetzner CX22) con Docker Compose + nginx + certbot
+2. **Configurar webhook** en Twilio con URL pública
+3. **Probar onboarding completo** en WhatsApp real
+4. **Opcional**: Soporte EN/PT en prompts (mayo 2026)
+5. **Opcional**: Semillas México en colección propia (julio 2026)

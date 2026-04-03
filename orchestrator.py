@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-Orchestrator - Aly Apapachar
-Flujo: Language → Intent → {GREETING | FACTUAL | PLAN | IDEATE | SENSITIVE}
+Orchestrator - Aly Equimundo
+Flujo: Language → [Intent + Librarian en paralelo] → barrier → {GREETING | FACTUAL | PLAN | IDEATE | SENSITIVE}
+Cada agente de respuesta (Factual, Plan, Ideate) recupera y genera su propio contexto.
 """
 
 import logging
-from typing import Dict, Any, TypedDict
+from typing import Annotated, Dict, Any, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 
 from agents.base_agent import AgentState
 from agents.language_agent import LanguageAgent
 from agents.intent_agent import IntentAgent
-from agents.rag_agent import ApapacharRAGAgent
+from agents.librarian_agent import LibrarianAgent
+from agents.factual_agent import FactualAgent
 from agents.plan_agent import PlanAgent
 from agents.ideate_agent import IdeateAgent
 from config.welcome_messages import get_welcome_message, get_sensitive_message
@@ -20,40 +22,54 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _last_wins(a, b):
+    """Reducer para campos escritos por ramas paralelas: la última escritura gana."""
+    return b
+
+
 class GraphState(TypedDict):
     user_input: str
     language: str
     language_config: Dict
-    mode: str
-    mode_confidence: float
+    # Escrito por detect_intent (rama paralela) → necesita reducer
+    mode: Annotated[str, _last_wins]
+    mode_confidence: Annotated[float, _last_wins]
     response: str
     sources: list
     debug_info: Dict
+    user_profile: Dict
+    # Escritos por librarian (rama paralela) → necesitan reducer
+    sources_to_query: Annotated[List[str], _last_wins]
+    rag_filters: Annotated[Optional[Dict], _last_wins]
 
 
 class ApapacharOrchestrator:
     """
-    Orquestador para Aly Apapachar.
-    Fuente única: Manual A+P (ICBF).
-    Agentes: FACTUAL (gpt-4o-mini) | PLAN (gemini-2.5-flash-lite) | IDEATE (mistral-small-creative)
+    Orquestador para Aly Equimundo.
+    Intent Agent y Librarian Agent corren en paralelo tras detectar el idioma.
+    Cada agente de respuesta (Factual, Plan, Ideate) hace su propia recuperación RAG
+    usando las colecciones y filtros decididos por el Librarian.
     """
 
     def __init__(self):
         self.language_agent = LanguageAgent()
         self.intent_agent = IntentAgent()
-        self.rag_agent = ApapacharRAGAgent()
+        self.librarian_agent = LibrarianAgent()
+        self.factual_agent = FactualAgent()
         self.plan_agent = PlanAgent()
         self.ideate_agent = IdeateAgent()
 
         self.workflow = self._create_workflow()
         self.app = self.workflow.compile()
-        logger.info("✅ Apapachar Orchestrator inicializado (FACTUAL + PLAN + IDEATE)")
+        logger.info("✅ Equimundo Orchestrator inicializado (parallel Intent + Librarian)")
 
     def _create_workflow(self) -> StateGraph:
         workflow = StateGraph(GraphState)
 
         workflow.add_node("detect_language", self._language_node)
         workflow.add_node("detect_intent", self._intent_node)
+        workflow.add_node("librarian", self._librarian_node)
+        workflow.add_node("barrier", self._barrier_node)
         workflow.add_node("greeting_response", self._greeting_node)
         workflow.add_node("factual_response", self._factual_node)
         workflow.add_node("plan_response", self._plan_node)
@@ -61,85 +77,131 @@ class ApapacharOrchestrator:
         workflow.add_node("sensitive_response", self._sensitive_node)
 
         workflow.set_entry_point("detect_language")
+
+        # Fan-out paralelo: detect_language → detect_intent Y librarian simultáneamente
         workflow.add_edge("detect_language", "detect_intent")
+        workflow.add_edge("detect_language", "librarian")
+
+        # Ambas ramas convergen en barrier
+        workflow.add_edge("detect_intent", "barrier")
+        workflow.add_edge("librarian", "barrier")
+
+        # Barrier → routing directo al agente de respuesta
         workflow.add_conditional_edges(
-            "detect_intent",
-            self._route,
+            "barrier",
+            self._route_after_barrier,
             {
                 "GREETING":  "greeting_response",
+                "SENSITIVE": "sensitive_response",
                 "FACTUAL":   "factual_response",
                 "PLAN":      "plan_response",
                 "IDEATE":    "ideate_response",
-                "SENSITIVE": "sensitive_response"
             }
         )
-        for node in ("greeting_response", "factual_response", "plan_response", "ideate_response", "sensitive_response"):
+
+        for node in ("greeting_response", "factual_response", "plan_response",
+                     "ideate_response", "sensitive_response"):
             workflow.add_edge(node, END)
 
         return workflow
 
     # ── Nodos ────────────────────────────────────────────────────────────────
 
-    def _language_node(self, state: GraphState) -> GraphState:
+    def _language_node(self, state: GraphState) -> dict:
         agent_state = AgentState(user_input=state["user_input"])
         result = self.language_agent.process(agent_state)
-        return {**state, "language": result.language, "language_config": result.language_config, "debug_info": {}}
+        return {
+            "language": result.language,
+            "language_config": result.language_config,
+            "debug_info": {},
+        }
 
-    def _intent_node(self, state: GraphState) -> GraphState:
+    def _intent_node(self, state: GraphState) -> dict:
         agent_state = AgentState(
             user_input=state["user_input"],
             language=state["language"],
-            language_config=state["language_config"]
+            language_config=state["language_config"],
         )
         result = self.intent_agent.process(agent_state)
-        return {**state, "mode": result.mode, "mode_confidence": result.mode_confidence}
+        return {"mode": result.mode, "mode_confidence": result.mode_confidence}
 
-    def _greeting_node(self, state: GraphState) -> GraphState:
+    def _librarian_node(self, state: GraphState) -> dict:
+        agent_state = AgentState(
+            user_input=state["user_input"],
+            user_profile=state.get("user_profile") or {},
+        )
+        result = self.librarian_agent.process(agent_state)
+        return {
+            "sources_to_query": result.sources_to_query or ["apapachar"],
+            "rag_filters": result.rag_filters,
+        }
+
+    def _barrier_node(self, state: GraphState) -> dict:
+        """Nodo de sincronización — espera que detect_intent y librarian completen."""
+        logger.info(
+            f"⚡ Barrier — mode={state.get('mode')} "
+            f"sources={state.get('sources_to_query')} "
+            f"filters={state.get('rag_filters')}"
+        )
+        return {"user_input": state["user_input"]}
+
+    def _greeting_node(self, state: GraphState) -> dict:
         welcome = get_welcome_message(state.get("language", "es"))
         logger.info(f"👋 GREETING → bienvenida en {state.get('language', 'es')}")
-        return {**state, "response": welcome, "sources": []}
+        return {"response": welcome, "sources": []}
 
-    def _factual_node(self, state: GraphState) -> GraphState:
+    def _factual_node(self, state: GraphState) -> dict:
         agent_state = AgentState(
             user_input=state["user_input"],
             language=state["language"],
             language_config=state["language_config"],
-            mode="FACTUAL"
+            mode="FACTUAL",
+            user_profile=state.get("user_profile"),
+            sources_to_query=state.get("sources_to_query"),
+            rag_filters=state.get("rag_filters"),
         )
-        result = self.rag_agent.process(agent_state)
-        return {**state, "response": result.response, "sources": result.sources or []}
+        result = self.factual_agent.process(agent_state)
+        return {"response": result.response, "sources": result.sources or []}
 
-    def _plan_node(self, state: GraphState) -> GraphState:
+    def _plan_node(self, state: GraphState) -> dict:
         agent_state = AgentState(
             user_input=state["user_input"],
             language=state["language"],
             language_config=state["language_config"],
-            mode="PLAN"
+            mode="PLAN",
+            user_profile=state.get("user_profile"),
+            sources_to_query=state.get("sources_to_query"),
+            rag_filters=state.get("rag_filters"),
         )
         result = self.plan_agent.process(agent_state)
-        return {**state, "response": result.response, "sources": result.sources or []}
+        return {"response": result.response, "sources": result.sources or []}
 
-    def _ideate_node(self, state: GraphState) -> GraphState:
+    def _ideate_node(self, state: GraphState) -> dict:
         agent_state = AgentState(
             user_input=state["user_input"],
             language=state["language"],
             language_config=state["language_config"],
-            mode="IDEATE"
+            mode="IDEATE",
+            user_profile=state.get("user_profile"),
+            sources_to_query=state.get("sources_to_query"),
+            rag_filters=state.get("rag_filters"),
         )
         result = self.ideate_agent.process(agent_state)
-        return {**state, "response": result.response, "sources": result.sources or []}
+        return {"response": result.response, "sources": result.sources or []}
 
-    def _sensitive_node(self, state: GraphState) -> GraphState:
+    def _sensitive_node(self, state: GraphState) -> dict:
         msg = get_sensitive_message(state.get("language", "es"))
         logger.info("⚠️ SENSITIVE → respuesta de derivación")
-        return {**state, "response": msg, "sources": []}
+        return {"response": msg, "sources": []}
 
-    def _route(self, state: GraphState) -> str:
+    # ── Routing ───────────────────────────────────────────────────────────────
+
+    def _route_after_barrier(self, state: GraphState) -> str:
         return state.get("mode", "FACTUAL")
 
     # ── API pública ───────────────────────────────────────────────────────────
 
-    def process_query(self, user_input: str) -> Dict[str, Any]:
+    def process_query(self, user_input: str, user_profile: Optional[Dict] = None) -> Dict[str, Any]:
         logger.info(f"🤖 Procesando: '{user_input[:60]}...'")
 
         initial_state = {
@@ -150,7 +212,10 @@ class ApapacharOrchestrator:
             "mode_confidence": 0.0,
             "response": "",
             "sources": [],
-            "debug_info": {}
+            "debug_info": {},
+            "user_profile": user_profile or {},
+            "sources_to_query": [],
+            "rag_filters": None,
         }
 
         try:
@@ -161,7 +226,8 @@ class ApapacharOrchestrator:
                 "intent": final_state["mode"],
                 "language": final_state["language"],
                 "language_detected": final_state["language"],
-                "sources": final_state["sources"]
+                "sources": final_state["sources"],
+                "sources_queried": final_state.get("sources_to_query", []),
             }
         except Exception as e:
             logger.error(f"❌ Error en orchestrator: {e}")

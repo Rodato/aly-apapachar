@@ -9,11 +9,9 @@ import os
 import requests
 from typing import Dict, List
 
-from rag.simple_rag_mongo import SimpleMongoRAG
+from rag.multi_collection_rag import MultiCollectionRAG
 
 from .base_agent import BaseAgent, AgentState
-
-DOCUMENT_FILTER = {"document_name": {"$regex": "MANUAL A\\+P_vICBF", "$options": "i"}}
 
 MODEL = "google/gemini-2.5-flash-lite"
 TEMPERATURE = 0.5
@@ -24,10 +22,10 @@ class PlanAgent(BaseAgent):
     def __init__(self):
         super().__init__(
             name="plan_agent",
-            description="Ayuda a implementar y adaptar actividades del Manual A+P"
+            description="Ayuda a implementar y adaptar actividades de Equimundo"
         )
         try:
-            self.rag_system = SimpleMongoRAG()
+            self.rag_system = MultiCollectionRAG(["apapachar", "aly_general_knowledge"])
             self.logger.info(f"✅ Plan Agent inicializado ({MODEL})")
         except Exception as e:
             self.logger.error(f"❌ Error inicializando Plan Agent: {e}")
@@ -48,11 +46,13 @@ class PlanAgent(BaseAgent):
             return state
 
         try:
-            if state.language_config:
-                self.rag_system.session_language = state.language
-                self.rag_system.language_config = state.language_config
-
-            chunks = self.rag_system.search_chunks(state.user_input, top_k=4, filters=DOCUMENT_FILTER)
+            collections = state.sources_to_query or ["apapachar"]
+            chunks = self.rag_system.search_chunks(
+                state.user_input,
+                top_k=5,
+                collections_to_use=collections,
+                metadata_filters=state.rag_filters,
+            )
 
             if not chunks:
                 state.response = self._no_context_msg(state.language_config)
@@ -70,51 +70,50 @@ class PlanAgent(BaseAgent):
         return state
 
     def _generate(self, query: str, chunks: List[Dict], language_config: Dict) -> str:
-        lang = language_config.get('code', 'es') if language_config else 'es'
-
         context = "\n\n".join([
-            f"[{c['chunk']['section_header']}]\n{c['chunk']['content']}"
+            f"[{c['chunk'].get('section_header') or c['chunk'].get('theme_category', '')}]\n{c['chunk']['content']}"
             for c in chunks[:4]
         ])
 
-        if lang == 'en':
-            prompt = f"""You are an expert facilitator of the Apapáchar (A+P) program.
-Your role is to help facilitators IMPLEMENT and ADAPT program activities to specific contexts.
-Base your response exclusively on the manual content provided.
-Be practical, structured, and step-by-step. Adapt to the specific context mentioned.
+        prompt = f"""Eres Aly, una asistente experta en programas de Equimundo. Estás aquí para ayudar a facilitadores a implementar y aplicar los programas de Equimundo.
+Ayuda al facilitador a convertir una actividad conocida, un desafío o un objetivo en un plan pequeño, claro y realista que pueda aplicar en su próxima sesión.
 
-Manual context:
+## Estructura tu respuesta así:
+**Tema:** <resumen en una línea de lo que el facilitador quiere hacer>
+**Plan Sugerido:**
+1- **[Nombre del Paso]:** ...
+2- **[Nombre del Paso]:** ...
+3- **[Nombre del Paso]:** ...
+
+**Consejos:**
+-> ...
+-> ...
+
+**Frase de Ejemplo:** "..."
+
+Recordatorio: Puedes ajustar esto según las necesidades de tu grupo.
+
+## REGLAS DE FORMATO:
+- Los pasos numerados DEBEN usar negrito como: "1- **Título:**"
+- Los subitems deben comenzar con "-> "
+- NUNCA uses barra invertida (\\) al final de una línea. Usa saltos de línea normales.
+- NO uses encabezados ###.
+
+## Capa de Seguridad:
+- Si el facilitador parece sobrecargado, comienza con: "Desglosemos esto en una sola cosa pequeña que puedas intentar."
+- Si el tema toca género/identidad: "Esto puede ser sensible — aquí hay una forma de invitar a la reflexión sin forzar la exposición."
+
+## Restricciones:
+- Nunca inventes estrategias. Solo adapta lo que ya está presente en el contexto del manual.
+- No des consejos sobre terapia familiar, tratamiento clínico o cuestiones de identidad.
+
+## Contexto del manual:
 {context}
 
-Request: {query}
+## Solicitud:
+{query}
 
-Practical implementation plan:"""
-
-        elif lang == 'pt':
-            prompt = f"""Você é um facilitador especialista do programa Apapáchar (A+P).
-Seu papel é ajudar facilitadores a IMPLEMENTAR e ADAPTAR atividades do programa a contextos específicos.
-Baseie sua resposta exclusivamente no conteúdo do manual fornecido.
-Seja prático, estruturado e passo a passo. Adapte ao contexto específico mencionado.
-
-Contexto do manual:
-{context}
-
-Solicitação: {query}
-
-Plano prático de implementação:"""
-
-        else:
-            prompt = f"""Eres un facilitador experto del programa Apapáchar (A+P).
-Tu rol es ayudar a facilitadores a IMPLEMENTAR y ADAPTAR actividades del programa a contextos específicos.
-Basa tu respuesta exclusivamente en el contenido del manual proporcionado.
-Sé práctico, estructurado y paso a paso. Adapta al contexto específico mencionado.
-
-Contexto del manual:
-{context}
-
-Solicitud: {query}
-
-Plan práctico de implementación:"""
+Respuesta:"""
 
         try:
             response = requests.post(
@@ -153,8 +152,9 @@ Plan práctico de implementación:"""
     def _format_sources(self, chunks: List[Dict]) -> List[Dict]:
         return [
             {
-                "document": c['chunk']['document_name'],
-                "section": c['chunk']['section_header'],
+                "document": c['chunk'].get('document_name', ''),
+                "section": c['chunk'].get('section_header', c['chunk'].get('theme_category', '')),
+                "collection": c.get('collection', ''),
                 "similarity": round(c['similarity'], 3),
                 "preview": c['chunk']['content'][:200] + "..."
             }

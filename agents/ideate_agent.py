@@ -9,11 +9,9 @@ import os
 import requests
 from typing import Dict, List
 
-from rag.simple_rag_mongo import SimpleMongoRAG
+from rag.multi_collection_rag import MultiCollectionRAG
 
 from .base_agent import BaseAgent, AgentState
-
-DOCUMENT_FILTER = {"document_name": {"$regex": "MANUAL A\\+P_vICBF", "$options": "i"}}
 
 MODEL = "mistralai/mistral-small-creative"
 TEMPERATURE = 0.8
@@ -24,10 +22,10 @@ class IdeateAgent(BaseAgent):
     def __init__(self):
         super().__init__(
             name="ideate_agent",
-            description="Genera ideas creativas basadas en el Manual A+P"
+            description="Genera ideas creativas basadas en el conocimiento de Equimundo"
         )
         try:
-            self.rag_system = SimpleMongoRAG()
+            self.rag_system = MultiCollectionRAG(["apapachar", "aly_general_knowledge"])
             self.logger.info(f"✅ Ideate Agent inicializado ({MODEL})")
         except Exception as e:
             self.logger.error(f"❌ Error inicializando Ideate Agent: {e}")
@@ -48,11 +46,13 @@ class IdeateAgent(BaseAgent):
             return state
 
         try:
-            if state.language_config:
-                self.rag_system.session_language = state.language
-                self.rag_system.language_config = state.language_config
-
-            chunks = self.rag_system.search_chunks(state.user_input, top_k=4, filters=DOCUMENT_FILTER)
+            collections = state.sources_to_query or ["apapachar"]
+            chunks = self.rag_system.search_chunks(
+                state.user_input,
+                top_k=5,
+                collections_to_use=collections,
+                metadata_filters=state.rag_filters,
+            )
 
             if not chunks:
                 state.response = self._no_context_msg(state.language_config)
@@ -70,49 +70,56 @@ class IdeateAgent(BaseAgent):
         return state
 
     def _generate(self, query: str, chunks: List[Dict], language_config: Dict) -> str:
-        lang = language_config.get('code', 'es') if language_config else 'es'
-
         context = "\n\n".join([
-            f"[{c['chunk']['section_header']}]\n{c['chunk']['content']}"
+            f"[{c['chunk'].get('section_header') or c['chunk'].get('theme_category', '')}]\n{c['chunk']['content']}"
             for c in chunks[:4]
         ])
 
-        if lang == 'en':
-            prompt = f"""You are a creative facilitator of the Apapáchar (A+P) program.
-Your role is to INSPIRE and generate NEW CREATIVE IDEAS for facilitators, grounded in the program's spirit.
-Use the manual as a foundation but think beyond it — suggest variations, dynamic activities, fresh angles.
-Be imaginative, warm, and encouraging.
+        prompt = f"""Eres Aly, una asistente experta en programas de Equimundo. Estás aquí para ayudar a facilitadores a implementar y aplicar los programas de Equimundo.
+Ofrece de 3 a 5 ideas de actividades inclusivas y seguras basadas en el tema o el objetivo del facilitador.
+Tu trabajo es abrir posibilidades — no dar una única respuesta final.
 
-Manual context (for inspiration):
+## Estructura tu respuesta así:
+**Tema:** <resumen en una línea>
+Aquí hay algunas ideas para explorar:
+**1- [Título]:** [resumen en una línea]
+-> **Prueba:** [ejemplo corto de frase o acción]
+**2- [Título]:** [resumen en una línea]
+-> **Prueba:** [ejemplo corto de frase o acción]
+(continúa para cada idea)
+
+Termina con: "¿Quieres ayuda para adaptar alguna de estas a tu grupo?"
+
+## REGLAS DE FORMATO:
+- Las ideas DEBEN usar negrito como: "**1- Título:**"
+- Los subitems deben comenzar con "-> **Prueba:**"
+- NUNCA uses barra invertida (\\) al final de una línea. Usa saltos de línea normales.
+- NO uses encabezados ###.
+
+## Tono:
+- Curioso, de apoyo y flexible
+- Nunca juzgues ni moralices
+- Evita términos académicos como "intervención" o "objetivo de aprendizaje"
+- Valida la agencia del facilitador: "Tú conoces a tu grupo — adáptalo como necesites."
+
+## Manejo de Situaciones Difíciles:
+- Si involucra género/religión/etc.: "Probemos una versión que deje espacio para diferentes perspectivas."
+- Si el input es vago: "Aquí hay varias direcciones posibles — ¿cuál encaja mejor con tu contexto?"
+
+## MANEJO DE TEMAS SENSIBLES:
+Cuando el tema va más allá de la facilitación de sesiones (ej: trauma, disciplina en casa, asuntos clínicos):
+- "Ese es un tema muy importante. Aunque no puedo orientarte directamente sobre eso, aquí hay una forma de apoyar a los participantes de manera segura en tus sesiones."
+- Luego ofrece una actividad o estrategia de reflexión relacionada.
+
+## Fallback (Input Poco Claro):
+Si el input es poco claro, pregunta:
+- "Solo para asegurarme — ¿estás buscando: 1) Explorar nuevas ideas? o 2) Adaptar algo que ya usas?"
+
+## Contexto del manual (para inspiración):
 {context}
 
-Request: {query}
-
-Creative ideas:"""
-
-        elif lang == 'pt':
-            prompt = f"""Você é um facilitador criativo do programa Apapáchar (A+P).
-Seu papel é INSPIRAR e gerar NOVAS IDEIAS CRIATIVAS para facilitadores, com base no espírito do programa.
-Use o manual como base, mas pense além dele — sugira variações, atividades dinâmicas, ângulos frescos.
-Seja imaginativo, caloroso e encorajador.
-
-Contexto do manual (para inspiração):
-{context}
-
-Solicitação: {query}
-
-Ideias criativas:"""
-
-        else:
-            prompt = f"""Eres un facilitador creativo del programa Apapáchar (A+P).
-Tu rol es INSPIRAR y generar NUEVAS IDEAS CREATIVAS para facilitadores, ancladas en el espíritu del programa.
-Usa el manual como base pero piensa más allá — sugiere variaciones, actividades dinámicas, ángulos frescos.
-Sé imaginativo, cálido y motivador.
-
-Contexto del manual (para inspiración):
-{context}
-
-Solicitud: {query}
+## Solicitud:
+{query}
 
 Ideas creativas:"""
 
@@ -153,8 +160,9 @@ Ideas creativas:"""
     def _format_sources(self, chunks: List[Dict]) -> List[Dict]:
         return [
             {
-                "document": c['chunk']['document_name'],
-                "section": c['chunk']['section_header'],
+                "document": c['chunk'].get('document_name', ''),
+                "section": c['chunk'].get('section_header', c['chunk'].get('theme_category', '')),
+                "collection": c.get('collection', ''),
                 "similarity": round(c['similarity'], 3),
                 "preview": c['chunk']['content'][:200] + "..."
             }

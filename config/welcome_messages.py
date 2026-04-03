@@ -1,61 +1,61 @@
 #!/usr/bin/env python3
 """
-Welcome Messages - Aly Apapachar
-Mensajes del programa A+P (Apapáchar) en 3 idiomas
+Welcome Messages - Aly Equimundo
+Mensajes estáticos de bienvenida, sensitive y follow-up en 3 idiomas.
 """
 
 WELCOME_MESSAGES = {
-    'es': """¡Hola! Soy Aly, tu asistente para el programa Apapáchar (A+P).
+    'es': """¡Hola! Soy Aly, tu asistente de facilitación 🤖🌱
 
-Estoy aquí para ayudarte a entender e implementar el Manual A+P del ICBF. Puedes preguntarme sobre actividades, metodología, objetivos del programa, cómo facilitar sesiones, y más.
+Estoy entrenada con la metodología de Equimundo y diseñada para apoyar a facilitadores como tú. Puedes preguntarme sobre actividades, cómo planear una sesión, adaptar materiales, resolver un desafío complejo u obtener ideas para involucrar a los participantes.
 
-¿En qué te puedo ayudar hoy?""",
+¡Lo que necesites! Solo pregúntame 😊""",
 
-    'en': """Hello! I'm Aly, your assistant for the Apapáchar (A+P) program.
+    'en': """Hello! I'm Aly, your facilitation assistant 🤖🌱
 
-I'm here to help you understand and implement the A+P Manual (ICBF). You can ask me about activities, methodology, program goals, how to facilitate sessions, and more.
+I'm trained on Equimundo's methodology and designed to support facilitators like you. You can ask me about activities, how to plan a session, adapt materials, tackle a complex challenge, or get ideas to engage participants.
 
-How can I help you today?""",
+Whatever you need — just ask! 😊""",
 
-    'pt': """Olá! Sou Aly, sua assistente para o programa Apapáchar (A+P).
+    'pt': """Olá! Sou Aly, sua assistente de facilitação 🤖🌱
 
-Estou aqui para ajudá-lo a entender e implementar o Manual A+P do ICBF. Você pode me perguntar sobre atividades, metodologia, objetivos do programa, como facilitar sessões e muito mais.
+Estou treinada com a metodologia da Equimundo e projetada para apoiar facilitadores como você. Pode me perguntar sobre atividades, como planejar uma sessão, adaptar materiais, resolver um desafio complexo ou obter ideias para engajar os participantes.
 
-Como posso ajudá-lo hoje?"""
+O que precisar — é só perguntar! 😊"""
 }
 
 SENSITIVE_MESSAGES = {
-    'es': """Entiendo que este es un tema delicado. Mi función es apoyarte con el contenido del programa A+P.
+    'es': """Entiendo que estás tocando un tema muy importante y delicado.
 
-Para situaciones que requieren apoyo emocional o intervención especializada, por favor contacta a los recursos de apoyo de tu institución o al equipo de Equimundo.
+Mi rol es apoyarte como facilitador/a en la implementación de los programas de Equimundo. Para situaciones que requieren atención especializada — apoyo emocional, intervención en crisis o acompañamiento clínico — lo más importante es conectar con los recursos adecuados de tu institución o con el equipo de Equimundo.
 
-¿Hay algo específico del Manual A+P en lo que pueda ayudarte?""",
+¿Hay algo relacionado con la facilitación de sesiones en lo que pueda ayudarte?""",
 
-    'en': """I understand this is a sensitive topic. My role is to support you with the A+P program content.
+    'en': """I understand you're touching on a very important and sensitive topic.
 
-For situations requiring emotional support or specialized intervention, please contact your institution's support resources or the Equimundo team.
+My role is to support you as a facilitator in implementing Equimundo programs. For situations requiring specialized attention — emotional support, crisis intervention, or clinical care — the most important step is connecting with the right resources at your institution or with the Equimundo team.
 
-Is there something specific in the A+P Manual I can help you with?""",
+Is there something related to session facilitation I can help you with?""",
 
-    'pt': """Entendo que este é um tópico delicado. Minha função é apoiá-lo com o conteúdo do programa A+P.
+    'pt': """Entendo que você está tocando em um tema muito importante e delicado.
 
-Para situações que requerem apoio emocional ou intervenção especializada, entre em contato com os recursos de apoio da sua instituição ou com a equipe da Equimundo.
+Meu papel é apoiá-lo como facilitador/a na implementação dos programas da Equimundo. Para situações que requerem atenção especializada — apoio emocional, intervenção em crise ou acompanhamento clínico — o mais importante é conectar com os recursos adequados da sua instituição ou com a equipe da Equimundo.
 
-Há algo específico no Manual A+P com que eu possa ajudá-lo?"""
+Há algo relacionado à facilitação de sessões em que eu possa ajudá-lo?"""
 }
 
 FOLLOW_UP_MESSAGES = {
     'es': {
-        'message_1': "¿Te fue útil esta información? ¿Tienes alguna otra pregunta sobre el programa A+P?",
-        'message_2': "Recuerda que puedo ayudarte con cualquier parte del Manual A+P: actividades, objetivos, metodología o cómo adaptar el programa."
+        'message_1': "¿Te fue útil esta información? ¿Tienes alguna otra pregunta?",
+        'message_2': "Recuerda que puedo ayudarte a planear sesiones, adaptar actividades, resolver dudas sobre los programas de Equimundo o generar ideas creativas para tu grupo."
     },
     'en': {
-        'message_1': "Was this information helpful? Do you have any other questions about the A+P program?",
-        'message_2': "Remember, I can help you with any part of the A+P Manual: activities, objectives, methodology, or how to adapt the program."
+        'message_1': "Was this information helpful? Do you have any other questions?",
+        'message_2': "Remember, I can help you plan sessions, adapt activities, answer questions about Equimundo programs, or generate creative ideas for your group."
     },
     'pt': {
-        'message_1': "Essa informação foi útil? Você tem alguma outra pergunta sobre o programa A+P?",
-        'message_2': "Lembre-se que posso ajudá-lo com qualquer parte do Manual A+P: atividades, objetivos, metodologia ou como adaptar o programa."
+        'message_1': "Essa informação foi útil? Você tem alguma outra pergunta?",
+        'message_2': "Lembre-se que posso ajudá-lo a planejar sessões, adaptar atividades, tirar dúvidas sobre os programas da Equimundo ou gerar ideias criativas para o seu grupo."
     }
 }
 

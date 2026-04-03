@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Aly Apapachar - WhatsApp Bot
-Bot especializado en el Manual A+P (ICBF) de Equimundo.
+Aly Equimundo - WhatsApp Bot
+Asistente experta en programas de Equimundo (Apapáchar Colombia + conocimiento general).
 Puerto: 8003
 """
 
@@ -29,28 +29,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Aly Apapachar - WhatsApp Bot")
+app = FastAPI(title="Aly Equimundo - WhatsApp Bot")
 
 orchestrator = None
+onboarding_agent = None
 twilio_client: Optional[Client] = None
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
 MAX_MSG_LENGTH = 1000
 
 
-def init_orchestrator():
-    try:
-        from orchestrator import ApapacharOrchestrator
-        logger.info("🚀 Inicializando Apapachar Orchestrator...")
-        return ApapacharOrchestrator()
-    except Exception as e:
-        logger.error(f"❌ Error inicializando orchestrator: {e}")
-        return None
+def init_services():
+    """Initializes orchestrator and onboarding agent. Runs in thread pool."""
+    from orchestrator import ApapacharOrchestrator
+    from agents.onboarding_agent import OnboardingAgent
+    logger.info("🚀 Inicializando Aly Equimundo...")
+    orc = ApapacharOrchestrator()
+    onb = OnboardingAgent()
+    return orc, onb
 
 
 @app.on_event("startup")
 async def startup_event():
-    global orchestrator, twilio_client
+    global orchestrator, onboarding_agent, twilio_client
 
     account_sid = os.getenv('TWILIO_ACCOUNT_SID')
     auth_token = os.getenv('TWILIO_AUTH_TOKEN')
@@ -62,12 +63,12 @@ async def startup_event():
         logger.info("✅ Cliente Twilio inicializado")
 
     loop = asyncio.get_event_loop()
-    orchestrator = await loop.run_in_executor(executor, init_orchestrator)
-
-    if orchestrator:
-        logger.info("✅ Aly Apapachar lista")
-    else:
-        logger.warning("⚠️ Orchestrator no disponible - modo básico")
+    try:
+        orchestrator, onboarding_agent = await loop.run_in_executor(executor, init_services)
+        logger.info("✅ Aly Equimundo lista (orchestrator + onboarding)")
+    except Exception as e:
+        logger.error(f"❌ Error inicializando servicios: {e}")
+        logger.warning("⚠️ Servicios no disponibles - modo básico")
 
 
 def clean_for_whatsapp(text: str) -> str:
@@ -114,12 +115,12 @@ async def send_whatsapp(to_number: str, whatsapp_number: str, text: str):
 
 
 async def process_and_respond(phone_number: str, message_body: str):
-    """Procesa el mensaje con ALY y responde activamente via Twilio."""
+    """Procesa el mensaje con Aly y responde via Twilio."""
     whatsapp_number = os.getenv('TWILIO_WHATSAPP_NUMBER')
     to_number = f"whatsapp:{phone_number}"
 
     try:
-        if not orchestrator:
+        if not orchestrator or not onboarding_agent:
             twilio_client.messages.create(
                 body="Sistema no disponible temporalmente. Intenta más tarde.",
                 from_=whatsapp_number,
@@ -128,17 +129,35 @@ async def process_and_respond(phone_number: str, message_body: str):
             return
 
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(executor, orchestrator.process_query, message_body)
+
+        # 1. Fetch or create user profile
+        from db.user_profiles import get_or_create_profile, is_onboarding_complete
+        profile = await loop.run_in_executor(executor, get_or_create_profile, phone_number)
+
+        # 2. Route to onboarding if not complete
+        if not is_onboarding_complete(profile):
+            from agents.base_agent import AgentState
+            agent_state = AgentState(user_input=message_body, user_profile=profile)
+            result_state = await loop.run_in_executor(executor, onboarding_agent.process, agent_state)
+            await send_whatsapp(to_number, whatsapp_number, result_state.response)
+            logger.info(f"📋 Onboarding step sent to {phone_number} (state: {profile.get('onboarding_state')})")
+            return
+
+        # 3. Main agent system for users with complete profiles
+        result = await loop.run_in_executor(
+            executor,
+            lambda: orchestrator.process_query(message_body, profile)
+        )
 
         response_text = result.get('answer', 'No pude procesar tu consulta. Intenta de nuevo.')
         intent = result.get('intent', 'FACTUAL')
         language = result.get('language_detected', 'es')
+        sources_queried = result.get('sources_queried', [])
 
-        # Enviar respuesta principal (dividida si es larga)
         await send_whatsapp(to_number, whatsapp_number, response_text)
-        logger.info(f"✅ Respuesta enviada a {phone_number} (intent: {intent}, lang: {language})")
+        logger.info(f"✅ Respuesta enviada a {phone_number} (intent: {intent}, lang: {language}, sources: {sources_queried})")
 
-        # Follow-up después de la primera respuesta real (no greeting)
+        # Follow-up after the first real response (not greeting)
         if intent != 'GREETING':
             from config.welcome_messages import get_follow_up_messages
             follow_up = get_follow_up_messages(language)
@@ -179,15 +198,16 @@ async def whatsapp_webhook(
 async def health():
     return {
         "status": "healthy",
-        "bot": "Aly Apapachar",
-        "document": "Manual A+P (ICBF)",
+        "bot": "Aly Equimundo",
+        "sources": ["apapachar", "aly_general_knowledge"],
         "timestamp": datetime.now().isoformat(),
         "orchestrator": "ready" if orchestrator else "initializing",
+        "onboarding": "ready" if onboarding_agent else "initializing",
         "twilio": "ready" if twilio_client else "not_ready"
     }
 
 
 if __name__ == "__main__":
-    logger.info("🚀 Iniciando Aly Apapachar WhatsApp Bot...")
+    logger.info("🚀 Iniciando Aly Equimundo WhatsApp Bot...")
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8003, reload=False, log_level="info")
