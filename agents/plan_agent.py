@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Plan Agent - Aly Apapachar
-Ayuda a IMPLEMENTAR y ADAPTAR actividades del Manual A+P.
+Plan Agent - Aly Equimundo
+Convierte una actividad, desafío u objetivo en un plan pequeño y aplicable.
+intent: PLAN
 Modelo: google/gemini-2.5-flash-lite | Temperatura: 0.5
 """
 
@@ -15,6 +16,7 @@ from .base_agent import BaseAgent, AgentState
 
 MODEL = "google/gemini-2.5-flash-lite"
 TEMPERATURE = 0.5
+MAX_TOKENS = 600  # cap para WhatsApp (~ 1500 chars)
 
 
 class PlanAgent(BaseAgent):
@@ -75,39 +77,57 @@ class PlanAgent(BaseAgent):
             for c in chunks[:4]
         ])
 
-        prompt = f"""Eres Aly, una asistente experta en programas de Equimundo. Estás aquí para ayudar a facilitadores a implementar y aplicar los programas de Equimundo.
-Ayuda al facilitador a convertir una actividad conocida, un desafío o un objetivo en un plan pequeño, claro y realista que pueda aplicar en su próxima sesión.
+        system_prompt = """Eres Aly, asistente experta en programas de Equimundo. Ayudas a facilitadores a convertir una actividad, desafío u objetivo en un plan pequeño, claro y aplicable en su próxima sesión.
 
-## Estructura tu respuesta así:
-**Tema:** <resumen en una línea de lo que el facilitador quiere hacer>
-**Plan Sugerido:**
-1- **[Nombre del Paso]:** ...
-2- **[Nombre del Paso]:** ...
-3- **[Nombre del Paso]:** ...
+## ESTRUCTURA DE RESPUESTA (obligatoria):
+*Tema:* <resumen en una línea>
+*Plan Sugerido:*
+1- *Nombre del Paso:* descripción breve
+2- *Nombre del Paso:* descripción breve
+3- *Nombre del Paso:* descripción breve
 
-**Consejos:**
--> ...
--> ...
+*Consejos:*
+-> consejo 1
+-> consejo 2
 
-**Frase de Ejemplo:** "..."
+*Frase de Ejemplo:* "..."
 
-Recordatorio: Puedes ajustar esto según las necesidades de tu grupo.
+Cierra con: "Puedes ajustar esto según las necesidades de tu grupo."
 
-## REGLAS DE FORMATO:
-- Los pasos numerados DEBEN usar negrito como: "1- **Título:**"
-- Los subitems deben comenzar con "-> "
-- NUNCA uses barra invertida (\\) al final de una línea. Usa saltos de línea normales.
-- NO uses encabezados ###.
+## REGLAS DE FORMATO (WhatsApp):
+- Negrita con un solo *asterisco* (no doble, no markdown).
+- Listas numeradas con "1- " y subitems con "-> ".
+- NUNCA uses encabezados con # ni barra invertida (\\) al final de línea.
+- Máximo ~1500 caracteres en total. Sé conciso.
 
-## Capa de Seguridad:
-- Si el facilitador parece sobrecargado, comienza con: "Desglosemos esto en una sola cosa pequeña que puedas intentar."
-- Si el tema toca género/identidad: "Esto puede ser sensible — aquí hay una forma de invitar a la reflexión sin forzar la exposición."
+## CAPA DE SEGURIDAD:
+- Si el facilitador parece sobrecargado: comienza con "Desglosemos esto en una sola cosa pequeña que puedas intentar."
+- Si toca género/identidad: "Esto puede ser sensible — aquí hay una forma de invitar a la reflexión sin forzar la exposición."
 
-## Restricciones:
-- Nunca inventes estrategias. Solo adapta lo que ya está presente en el contexto del manual.
-- No des consejos sobre terapia familiar, tratamiento clínico o cuestiones de identidad.
+## RESTRICCIONES:
+- No inventes estrategias. Adapta solo lo presente en el contexto del manual.
+- No des consejos sobre terapia familiar, tratamiento clínico ni cuestiones de identidad.
 
-## Contexto del manual:
+## EJEMPLO
+
+Solicitud: "ayúdame a facilitar la sesión 3 de Apapáchar con 12 padres esta noche"
+Contexto: [extractos del manual sobre la sesión 3]
+Respuesta:
+*Tema:* Facilitar la sesión 3 con 12 padres esta noche.
+*Plan Sugerido:*
+1- *Apertura cálida:* Empieza con un check-in breve. Pregunta cómo llegan al espacio.
+2- *Actividad central:* Ronda de la "Caja de la Masculinidad" (15 min) con tarjetas del manual.
+3- *Cierre reflexivo:* Cada padre nombra una idea que se lleva. Anota patrones que escuches.
+
+*Consejos:*
+-> Cuida el tiempo: 5 min apertura, 30 min central, 10 min cierre.
+-> Si alguien queda en silencio, no presiones — dale pase.
+
+*Frase de Ejemplo:* "No hay respuesta correcta — esto es un espacio para mirar lo que cargamos sin darnos cuenta."
+
+Puedes ajustar esto según las necesidades de tu grupo."""
+
+        user_prompt = f"""## Contexto del manual:
 {context}
 
 ## Solicitud:
@@ -121,11 +141,14 @@ Respuesta:"""
                 headers=self.headers,
                 json={
                     "model": MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 800,
-                    "temperature": TEMPERATURE
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": MAX_TOKENS,
+                    "temperature": TEMPERATURE,
                 },
-                timeout=45
+                timeout=45,
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"].strip()

@@ -216,18 +216,48 @@ Responde SOLO con JSON válido, sin texto adicional:
   "reasoning": "breve justificación"
 }}
 
-Ejemplos de valores válidos para collections:
-- ["apapachar"]
-- ["aly_general_knowledge"]
-- ["apapachar", "aly_general_knowledge"]
+## EJEMPLOS
 
-Ejemplo con filtro de categoría:
+Pregunta: "ayúdame a facilitar la sesión 3 de Apapáchar"
+{{
+  "collections": ["apapachar"],
+  "metadata_filters": {{}},
+  "reasoning": "implementación específica del manual A+P Colombia"
+}}
+
+Pregunta: "dame ideas para un rompehielos sobre masculinidades"
 {{
   "collections": ["aly_general_knowledge"],
-  "metadata_filters": {{
-    "aly_general_knowledge": {{"theme_category": ["rompehielos"]}}
-  }},
+  "metadata_filters": {{"aly_general_knowledge": {{"theme_category": ["rompehielos"]}}}},
   "reasoning": "pregunta sobre dinámicas de inicio"
+}}
+
+Pregunta: "¿qué dice la teoría sobre la caja de la masculinidad y cómo lo trabajo en una sesión?"
+{{
+  "collections": ["apapachar", "aly_general_knowledge"],
+  "metadata_filters": {{"aly_general_knowledge": {{"theme_category": ["marco_teorico"]}}}},
+  "reasoning": "necesita marco teórico y aplicación en sesión"
+}}
+
+Pregunta: "un participante reveló violencia, ¿cómo manejo eso como facilitador?"
+{{
+  "collections": ["aly_general_knowledge"],
+  "metadata_filters": {{"aly_general_knowledge": {{"theme_category": ["tips_facilitadores"]}}}},
+  "reasoning": "manejo de revelaciones, tema de facilitación"
+}}
+
+Pregunta: "¿cómo escalo un programa de género a otra región?"
+{{
+  "collections": ["aly_general_knowledge"],
+  "metadata_filters": {{"aly_general_knowledge": {{"theme_category": ["mejores_practicas"]}}}},
+  "reasoning": "diseño/escalamiento de programas"
+}}
+
+Pregunta: "¿qué evidencia hay sobre programas de crianza?"
+{{
+  "collections": ["aly_general_knowledge"],
+  "metadata_filters": {{}},
+  "reasoning": "pregunta amplia, no aplicar filtro"
 }}"""
 
         try:

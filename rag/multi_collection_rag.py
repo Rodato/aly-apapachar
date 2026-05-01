@@ -31,7 +31,6 @@ class MultiCollectionRAG:
         self.uri = os.getenv("MONGODB_URI")
         self.db_name = os.getenv("MONGODB_DB_NAME")
         self.openai_key = os.getenv("OPENAI_API_KEY")
-        self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
 
         if not all([self.uri, self.db_name, self.openai_key]):
             raise ValueError("MONGODB_URI, MONGODB_DB_NAME y OPENAI_API_KEY son requeridas")
@@ -42,10 +41,6 @@ class MultiCollectionRAG:
 
         self.openai_headers = {
             "Authorization": f"Bearer {self.openai_key}",
-            "Content-Type": "application/json",
-        }
-        self.openrouter_headers = {
-            "Authorization": f"Bearer {self.openrouter_key}",
             "Content-Type": "application/json",
         }
 
@@ -157,69 +152,3 @@ class MultiCollectionRAG:
         top = all_similarities[:top_k]
         logger.info(f"✅ Top {len(top)} chunks (merged from {active_cols})")
         return top
-
-    # ------------------------------------------------------------------
-    # Answer generation — same interface as SimpleMongoRAG
-    # ------------------------------------------------------------------
-
-    def set_language_config(self, language_config: Dict):
-        self.language_config = language_config
-
-    def generate_answer(self, query: str, context_chunks: List[Dict], language_config: Dict = None) -> Dict:
-        """Genera respuesta usando GPT-4o-mini con contexto de múltiples colecciones."""
-        lang_cfg = language_config or getattr(self, "language_config", {"code": "es", "name": "Español"})
-
-        context = "\n\n".join([
-            f"**{c['chunk'].get('document_name', 'Documento')}**"
-            f"{' - ' + c['chunk']['section_header'] if c['chunk'].get('section_header') else ''}"
-            f"\n{c['chunk']['content']}"
-            for c in context_chunks[:3]
-        ])
-
-        prompt = f"""Eres Aly, una asistente experta en programas de Equimundo. Estás aquí para ayudar a facilitadores a implementar y aplicar los programas de Equimundo.
-Responde basándote exclusivamente en el contexto proporcionado. Nunca inventes ni agregues información que no esté en el contexto.
-
-## FORMATO (WhatsApp):
-- *negrita* para conceptos clave y puntos importantes
-- -> para listas con viñetas
-- 1- para listas numeradas
-- NUNCA uses barra invertida (\\) al final de una línea. Usa saltos de línea normales.
-- NO uses encabezados ###.
-
-## Tono:
-- Cálido, amigable y práctico
-- Valida el rol del facilitador
-- Mantén las respuestas concisas y ancladas en los documentos
-
-## Restricción:
-- Si la respuesta no está en el contexto, di: "No tengo información específica sobre eso. ¿Podrías reformular o preguntar algo diferente?"
-
-## Contexto:
-{context}
-
-## Pregunta:
-{query}
-
-Respuesta:"""
-
-        try:
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=self.openai_headers,
-                json={
-                    "model": "gpt-4o-mini",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 500,
-                    "temperature": 0.3,
-                },
-                timeout=45,
-            )
-            response.raise_for_status()
-            answer = response.json()["choices"][0]["message"]["content"].strip()
-            return {"answer": answer, "language_info": lang_cfg}
-        except Exception as e:
-            logger.error(f"Error generando respuesta: {e}")
-            return {
-                "answer": "Error generando respuesta. Intenta de nuevo.",
-                "language_info": lang_cfg,
-            }

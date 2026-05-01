@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 Orchestrator - Aly Equimundo
-Flujo: Language → [Intent + Librarian en paralelo] → barrier → {GREETING | FACTUAL | PLAN | IDEATE | SENSITIVE}
+Flujo: triage → SENSITIVE: sensitive_response
+               CONTINUE:   Language → [Intent + Librarian en paralelo] → barrier → {GREETING | FACTUAL | PLAN | IDEATE}
 Cada agente de respuesta (Factual, Plan, Ideate) recupera y genera su propio contexto.
 """
 
 import logging
+import requests as _requests
 from typing import Annotated, Dict, Any, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 
@@ -16,7 +18,8 @@ from agents.librarian_agent import LibrarianAgent
 from agents.factual_agent import FactualAgent
 from agents.plan_agent import PlanAgent
 from agents.ideate_agent import IdeateAgent
-from config.welcome_messages import get_welcome_message, get_sensitive_message
+from agents.sensitive_agent import SensitiveAgent
+from config.welcome_messages import get_welcome_message
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,6 +61,7 @@ class ApapacharOrchestrator:
         self.factual_agent = FactualAgent()
         self.plan_agent = PlanAgent()
         self.ideate_agent = IdeateAgent()
+        self.sensitive_agent = SensitiveAgent()
 
         self.workflow = self._create_workflow()
         self.app = self.workflow.compile()
@@ -66,6 +70,7 @@ class ApapacharOrchestrator:
     def _create_workflow(self) -> StateGraph:
         workflow = StateGraph(GraphState)
 
+        workflow.add_node("triage", self._triage_node)
         workflow.add_node("detect_language", self._language_node)
         workflow.add_node("detect_intent", self._intent_node)
         workflow.add_node("librarian", self._librarian_node)
@@ -76,7 +81,17 @@ class ApapacharOrchestrator:
         workflow.add_node("ideate_response", self._ideate_node)
         workflow.add_node("sensitive_response", self._sensitive_node)
 
-        workflow.set_entry_point("detect_language")
+        workflow.set_entry_point("triage")
+
+        # Triage: SENSITIVE directo, cualquier otra cosa sigue el flujo normal
+        workflow.add_conditional_edges(
+            "triage",
+            self._route_after_triage,
+            {
+                "SENSITIVE": "sensitive_response",
+                "CONTINUE":  "detect_language",
+            }
+        )
 
         # Fan-out paralelo: detect_language → detect_intent Y librarian simultáneamente
         workflow.add_edge("detect_language", "detect_intent")
@@ -86,16 +101,15 @@ class ApapacharOrchestrator:
         workflow.add_edge("detect_intent", "barrier")
         workflow.add_edge("librarian", "barrier")
 
-        # Barrier → routing directo al agente de respuesta
+        # Barrier → routing al agente de respuesta (SENSITIVE ya no llega aquí)
         workflow.add_conditional_edges(
             "barrier",
             self._route_after_barrier,
             {
-                "GREETING":  "greeting_response",
-                "SENSITIVE": "sensitive_response",
-                "FACTUAL":   "factual_response",
-                "PLAN":      "plan_response",
-                "IDEATE":    "ideate_response",
+                "GREETING": "greeting_response",
+                "FACTUAL":  "factual_response",
+                "PLAN":     "plan_response",
+                "IDEATE":   "ideate_response",
             }
         )
 
@@ -106,6 +120,64 @@ class ApapacharOrchestrator:
         return workflow
 
     # ── Nodos ────────────────────────────────────────────────────────────────
+
+    def _triage_node(self, state: GraphState) -> dict:
+        """Filtro rápido: ¿es SENSITIVE? Si sí, saltea Language + Librarian."""
+        user_input = state["user_input"]
+        is_sensitive = self._is_sensitive(user_input)
+        if is_sensitive:
+            logger.info("⚠️ TRIAGE → SENSITIVE detectado, saltando Language + Librarian")
+            return {"mode": "SENSITIVE"}
+        logger.info("✅ TRIAGE → no sensible, flujo normal")
+        return {"user_input": state["user_input"]}
+
+    def _is_sensitive(self, user_input: str) -> bool:
+        prompt = f"""Eres un clasificador para Aly, asistente de facilitadores de Equimundo.
+
+Determina si este mensaje requiere una respuesta SENSIBLE.
+
+Es SENSITIVE si:
+- El/la facilitador/a reporta o vive angustia emocional propia ("me afectó mucho", "no sé cómo manejarlo, me desbordó")
+- Un participante divulgó una situación de violencia, abuso o riesgo ("me contó que su pareja lo golpea")
+- Hay una crisis activa o riesgo inminente para alguien
+- El mensaje contiene daño normativo: chistes sexistas, minimización de violencia, estereotipos dañinos ("fue solo un chiste", "algo habrá hecho")
+
+NO es SENSITIVE si pregunta sobre temas difíciles desde un lugar informativo o de planificación — aunque el tema sea violencia, abuso o género.
+
+Ejemplos:
+"me afectó mucho lo que pasó en la sesión de hoy" → SENSITIVE
+"un participante me contó que su pareja lo golpea" → SENSITIVE
+"alguien hizo un chiste sobre violación y el grupo se rió" → SENSITIVE
+"tengo miedo de perder el control con mi pareja" → SENSITIVE
+"¿cómo hablo del ciclo de violencia en la sesión 4?" → NOT_SENSITIVE
+"dame ideas para la actividad de masculinidades" → NOT_SENSITIVE
+"¿qué dice Apapáchar sobre paternidad activa?" → NOT_SENSITIVE
+
+Mensaje: "{user_input}"
+
+Responde SOLO con una palabra: SENSITIVE o NOT_SENSITIVE"""
+
+        try:
+            resp = _requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=self.intent_agent.headers,
+                json={
+                    "model": "mistralai/ministral-8b-2512",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 10,
+                    "temperature": 0.0,
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip().upper()
+            return "SENSITIVE" in content and "NOT_SENSITIVE" not in content
+        except Exception as e:
+            logger.error(f"❌ Error en triage, continuando flujo normal: {e}")
+            return False  # failsafe: flujo normal
+
+    def _route_after_triage(self, state: GraphState) -> str:
+        return "SENSITIVE" if state.get("mode") == "SENSITIVE" else "CONTINUE"
 
     def _language_node(self, state: GraphState) -> dict:
         agent_state = AgentState(user_input=state["user_input"])
@@ -190,9 +262,15 @@ class ApapacharOrchestrator:
         return {"response": result.response, "sources": result.sources or []}
 
     def _sensitive_node(self, state: GraphState) -> dict:
-        msg = get_sensitive_message(state.get("language", "es"))
-        logger.info("⚠️ SENSITIVE → respuesta de derivación")
-        return {"response": msg, "sources": []}
+        agent_state = AgentState(
+            user_input=state["user_input"],
+            language=state.get("language") or "es",
+            language_config=state.get("language_config") or {"code": "es"},
+            mode="SENSITIVE",
+        )
+        result = self.sensitive_agent.process(agent_state)
+        logger.info("⚠️ SENSITIVE → respuesta generada por SensitiveAgent")
+        return {"response": result.response, "sources": []}
 
     # ── Routing ───────────────────────────────────────────────────────────────
 

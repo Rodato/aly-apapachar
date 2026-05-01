@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Factual Agent - Aly Apapachar
-Recupera contexto del conocimiento de Equimundo y genera una respuesta factual y conservadora.
+Factual Agent - Aly Equimundo
+Recupera contexto y genera una respuesta factual y conservadora.
 intent: FACTUAL
+Modelo: gpt-4o-mini | OpenAI
 """
 
+import os
+import requests
 from typing import Dict, List
 
 from rag.multi_collection_rag import MultiCollectionRAG
 
 from .base_agent import BaseAgent, AgentState
+
+MODEL = "gpt-4o-mini"
+TEMPERATURE = 0.3
+MAX_TOKENS = 500  # cap WhatsApp (~ 1300 chars)
 
 
 class FactualAgent(BaseAgent):
@@ -21,10 +28,16 @@ class FactualAgent(BaseAgent):
         )
         try:
             self.rag_system = MultiCollectionRAG(["apapachar", "aly_general_knowledge"])
-            self.logger.info("✅ Factual Agent inicializado (multi-colección)")
+            self.logger.info(f"✅ Factual Agent inicializado ({MODEL})")
         except Exception as e:
             self.logger.error(f"❌ Error inicializando Factual Agent: {e}")
             self.rag_system = None
+
+        self.openai_key = os.getenv("OPENAI_API_KEY")
+        self.headers = {
+            "Authorization": f"Bearer {self.openai_key}",
+            "Content-Type": "application/json",
+        }
 
     def process(self, state: AgentState) -> AgentState:
         self.log_processing(state, f"Buscando: '{state.user_input[:50]}...'")
@@ -47,10 +60,7 @@ class FactualAgent(BaseAgent):
                 state.response = self._no_context_msg(state.language_config)
                 state.sources = []
             else:
-                result = self.rag_system.generate_answer(
-                    state.user_input, chunks, state.language_config
-                )
-                state.response = result['answer']
+                state.response = self._generate(state.user_input, chunks, state.language_config)
                 state.sources = self._format_sources(chunks)
                 self.log_processing(state, f"Respuesta generada con {len(chunks)} chunks de {collections}")
 
@@ -60,6 +70,69 @@ class FactualAgent(BaseAgent):
             state.sources = []
 
         return state
+
+    def _generate(self, query: str, chunks: List[Dict], language_config: Dict) -> str:
+        context = "\n\n".join([
+            f"**{c['chunk'].get('document_name', 'Documento')}**"
+            f"{' - ' + c['chunk']['section_header'] if c['chunk'].get('section_header') else ''}"
+            f"\n{c['chunk']['content']}"
+            for c in chunks[:3]
+        ])
+
+        system_prompt = """Eres Aly, asistente experta en programas de Equimundo. Ayudas a facilitadores con información factual y conservadora basada en el material de los programas.
+
+## REGLA CENTRAL:
+Responde ÚNICAMENTE con base en el contexto proporcionado. Nunca inventes ni añadas información que no esté en el contexto.
+
+## ESTRUCTURA DE RESPUESTA:
+- Comienza con la respuesta directa a la pregunta (1-2 frases).
+- Si la pregunta requiere desarrollo, agrega 2-3 viñetas con "-> ".
+- Cierra con una invitación breve: "¿Quieres que profundice en algún punto?" (cuando aplique).
+
+## REGLAS DE FORMATO (WhatsApp):
+- Negrita con un solo *asterisco* (no doble, no markdown).
+- Listas con "-> " (viñetas) o "1- " (numeradas).
+- NUNCA uses encabezados con # ni barra invertida (\\) al final de línea.
+- Máximo ~1300 caracteres. Sé directo, no repitas la pregunta.
+
+## TONO:
+- Cálido, amigable y práctico.
+- Valida el rol del facilitador.
+- Mantén las respuestas concisas y ancladas en los documentos.
+
+## CUANDO NO SABES:
+Si la respuesta no está en el contexto, di literalmente:
+"No tengo información específica sobre eso. ¿Podrías reformular o preguntar algo diferente?"
+No completes con conocimiento general."""
+
+        user_prompt = f"""## Contexto:
+{context}
+
+## Pregunta:
+{query}
+
+Respuesta:"""
+
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=self.headers,
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": MAX_TOKENS,
+                    "temperature": TEMPERATURE,
+                },
+                timeout=45,
+            )
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            self.logger.error(f"❌ Error generando respuesta factual: {e}")
+            return self._error_msg(language_config)
 
     def _no_context_msg(self, language_config: Dict) -> str:
         if not language_config:
